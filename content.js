@@ -22,49 +22,38 @@
       pointerEvents: 'none'
     });
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 1600);
+    setTimeout(() => el.remove(), 1800);
   }
 
   function dispatchEditorEvents(editor) {
-    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+    editor.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertFromPaste',
+      data: null
+    }));
     editor.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function insertHtmlAtCaret(editor, html) {
+  function hasMeaningfulContent(editor) {
+    const text = (editor.innerText || '').replace(/\u200B/g, '').trim();
+    if (text) return true;
+
+    return Boolean(editor.querySelector('img, video, iframe, hr, ul, ol, table, blockquote'));
+  }
+
+  function replaceEditorContent(editor, html) {
     editor.focus();
+    editor.innerHTML = html;
 
-    const sel = window.getSelection();
-    let range = null;
+    // Caret is moved to the end so typing can continue naturally after replacement.
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
 
-    if (sel && sel.rangeCount) {
-      const candidate = sel.getRangeAt(0);
-      if (editor.contains(candidate.commonAncestorContainer)) range = candidate;
-    }
-
-    if (!range) {
-      range = document.createRange();
-      range.selectNodeContents(editor);
-      range.collapse(false);
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    }
-
-    range.deleteContents();
-
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    const fragment = template.content;
-    const lastNode = fragment.lastChild;
-    range.insertNode(fragment);
-
-    if (lastNode && sel) {
-      const after = document.createRange();
-      after.setStartAfter(lastNode);
-      after.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(after);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
     }
 
     dispatchEditorEvents(editor);
@@ -80,10 +69,19 @@
     const html = window.DmmMarkdownPaste.markdownToDmmHtml(text);
     if (!html) return;
 
-    event.preventDefault();
-    event.stopPropagation();
+    // Markdown paste is treated as a full-document import for the focused DMM editor.
+    // This intentionally avoids inserting block HTML inside existing bold/list/link nodes.
+    if (hasMeaningfulContent(editor)) {
+      const ok = window.confirm(
+        'この編集欄には既存の内容があります。\nMarkdownの内容で全文を置き換えますか？'
+      );
+      if (!ok) return;
+    }
 
-    insertHtmlAtCaret(editor, html);
-    showToast('Markdownとして貼り付けました');
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    replaceEditorContent(editor, html);
+    showToast('Markdownで全文を置き換えました');
   }, true);
 })();
